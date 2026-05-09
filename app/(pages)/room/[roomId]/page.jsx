@@ -111,7 +111,7 @@ export default function RoomPage() {
             crypto.randomUUID();
 
         const ws = new WebSocket(
-            "ws://localhost:3001"
+            process.env.NEXT_PUBLIC_WS_URL
         );
 
         ws.onopen = async () => {
@@ -131,7 +131,8 @@ export default function RoomPage() {
                 new RTCPeerConnection({
                     iceServers: [
                         {
-                            urls: "stun:stun.l.google.com:19302",
+                            urls:
+                                process.env.NEXT_PUBLIC_STUN_URL,
                         },
                     ],
                 });
