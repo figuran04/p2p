@@ -11,6 +11,22 @@ export default function manifest() {
     orientation: "portrait",
     scope: "/",
     categories: ["productivity", "utilities", "file-transfer"],
+    share_target: {
+      action: "/",
+      method: "POST",
+      enctype: "multipart/form-data",
+      params: {
+        title: "title",
+        text: "text",
+        url: "url",
+        files: [
+          {
+            name: "files",
+            accept: ["image/*", "video/*", "audio/*", "application/*", "*/*"],
+          },
+        ],
+      },
+    },
     icons: [
       {
         src: "/favicon.ico",
@@ -36,16 +52,18 @@ export default function manifest() {
     ],
     shortcuts: [
       {
-        name: "Create Room",
-        short_name: "New Room",
-        description: "Create a new file sharing room",
-        url: "/",
-        icons: [
-          {
-            src: "/favicon.ico",
-            sizes: "96x96",
-          },
-        ],
+        name: "Quick Share",
+        short_name: "Share",
+        description: "Quickly share files",
+        url: "/?action=share",
+        icons: [{ src: "/share-icon.png", sizes: "96x96" }],
+      },
+      {
+        name: "Join Room",
+        short_name: "Join",
+        description: "Join existing room",
+        url: "/join",
+        icons: [{ src: "/join-icon.png", sizes: "96x96" }],
       },
     ],
     related_applications: [],

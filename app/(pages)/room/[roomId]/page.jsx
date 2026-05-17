@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import QRCode from "react-qr-code";
 import { rtcConfig } from "@/libs/webrtc";
 import Link from "next/link";
@@ -16,6 +16,7 @@ const formatBytes = (bytes) => {
 
 export default function RoomPage() {
     const params = useParams();
+    const router = useRouter();
     const roomId = params.roomId;
     const roomUrl = typeof window !== "undefined" ? window.location.href : "";
 
@@ -40,10 +41,7 @@ export default function RoomPage() {
     const fileInputRef = useRef(null);
     const dropZoneRef = useRef(null);
     const sendingFilesRef = useRef(new Set());
-
-    const clientUsers = useMemo(() => {
-        return roomUsers.filter((u) => u.role === "client" && u.id !== myId);
-    }, [roomUsers, myId]);
+    const shouldReconnect = useRef(true);
 
     const connectedClients = useMemo(() => {
         return roomUsers.filter((u) => u.role === "client").length;
@@ -104,20 +102,6 @@ export default function RoomPage() {
             `[${new Date().toLocaleTimeString()}] ${msg}`,
             ...prev.slice(0, 99),
         ]);
-    }, []);
-
-    const setUniqueRoomUsers = useCallback((users) => {
-        const unique = [];
-        const seen = new Set();
-
-        for (const user of users) {
-            if (!seen.has(user.id)) {
-                seen.add(user.id);
-                unique.push(user);
-            }
-        }
-
-        setRoomUsers(unique);
     }, []);
 
     // ============================================================
@@ -477,13 +461,37 @@ export default function RoomPage() {
                 log(`Channel not ready for ${targetId}, skipping...`);
                 continue;
             }
+            
+            // Initialize a per-channel transfer queue
+            if (!channel._queue) channel._queue = [];
+            
+            // Add files to the queue
             for (const file of files) {
-                sendTasks.push(sendSingleFile(targetId, file));
+                channel._queue.push(file);
             }
+
+            // Process the queue sequentially
+            const processQueue = async () => {
+                if (channel._isSending) return;
+                channel._isSending = true;
+
+                while (channel._queue.length > 0) {
+                    const fileToSend = channel._queue.shift();
+                    try {
+                        await sendSingleFile(targetId, fileToSend);
+                    } catch (err) {
+                        console.error(`Error sending to ${targetId}:`, err);
+                    }
+                }
+                
+                channel._isSending = false;
+            };
+
+            sendTasks.push(processQueue());
         }
 
         await Promise.all(sendTasks);
-        log("All files sent!");
+        log("All files queued/sent!");
     }, [selectedTargets, availableTargets, sendSingleFile, log, isHost, roomUsers]);
 
     // ============================================================
@@ -640,15 +648,15 @@ export default function RoomPage() {
                 ws.onopen = () => {
                     console.log("WebSocket connected successfully");
                     setStatus("Connected");
-                    reconnectAttempts = 0; // Reset reconnect attempts on successful connection
+                    reconnectAttempts = 0;
 
-                    // Send join room message
                     if (ws.readyState === WebSocket.OPEN) {
                         ws.send(
                             JSON.stringify({
                                 type: "join-room",
                                 roomId,
                                 name: deviceName,
+                                mode: "full", // ✅ tambahkan mode
                             })
                         );
                     }
@@ -704,8 +712,41 @@ export default function RoomPage() {
                             case "room-closed":
                                 alert("Room has been closed by the host");
                                 setStatus("Disconnected");
+<<<<<<< Updated upstream
                                 // Clean up peers
                                 Object.values(peersRef.current).forEach((peer) => {
+=======
+
+                                // Clean up all peers
+                                const cleanupPromises = Object.values(peersRef.current).map((peer) => {
+                                    return new Promise((resolve) => {
+                                        try {
+                                            if (peer.signalingState !== "closed") {
+                                                peer.close();
+                                            }
+                                        } catch (e) {
+                                            console.error("Error closing peer:", e);
+                                        }
+                                        resolve();
+                                    });
+                                });
+
+                                await Promise.all(cleanupPromises);
+                                peersRef.current = {};
+                                channelsRef.current = {};
+
+                                // Redirect to home after 1 second
+                                setTimeout(() => {
+                                    router.push("/");
+                                }, 1000);
+                                break;
+
+                            case "rejected":
+                                console.log("Join request rejected by host");
+
+                                // Clean up peers with proper error handling
+                                for (const peer of Object.values(peersRef.current)) {
+>>>>>>> Stashed changes
                                     try {
                                         peer.close();
                                     } catch (e) {
@@ -716,14 +757,40 @@ export default function RoomPage() {
                                 channelsRef.current = {};
                                 break;
 
+<<<<<<< Updated upstream
                             case "rejected":
                                 alert(data.message || "Your join request was rejected");
                                 setStatus("Rejected");
+=======
+                                // Close WebSocket connection
+                                if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+                                    wsRef.current.close(1000, "Rejected by host");
+                                }
+
+                                // Store rejection message for home page
+                                const rejectMessage = data.message || "Your join request was rejected by the host";
+                                sessionStorage.setItem("rejectMessage", rejectMessage);
+                                sessionStorage.setItem("rejectTimestamp", Date.now().toString());
+
+                                // Redirect to home
+                                router.push("/");
+>>>>>>> Stashed changes
                                 break;
 
                             case "error":
                                 console.error("Server error:", data.message);
                                 log(`Error: ${data.message}`);
+<<<<<<< Updated upstream
+=======
+
+                                // Show user-friendly error message
+                                if (data.message.includes("full") || data.message.includes("limit")) {
+                                    alert(data.message);
+                                    setTimeout(() => {
+                                        router.push("/");
+                                    }, 2000);
+                                }
+>>>>>>> Stashed changes
                                 break;
 
                             case "user-connected":
@@ -742,6 +809,30 @@ export default function RoomPage() {
                                 ));
                                 break;
 
+                            case "room-mode-mismatch": {
+                                shouldReconnect.current = false;
+                                const expectedMode = data.expectedMode;
+                                const roomId = data.roomId;
+
+                                log(`Room mode mismatch. Expected: ${expectedMode}`, "warn");
+
+                                reconnectAttempts = maxReconnectAttempts;
+                                isMounted.current = false;
+
+                                if (ws) {
+                                    ws.onclose = null;
+                                    ws.close();
+                                }
+                                if (expectedMode === "share") {
+                                    router.push(`/receive/${roomId}`);
+                                } else if (expectedMode === "receive") {
+                                    router.push(`/receive/${roomId}`);
+                                } else {
+                                    router.push("/");
+                                }
+                                return;
+                            }
+
                             default:
                                 console.log("Unknown message type:", data.type);
                         }
@@ -755,20 +846,19 @@ export default function RoomPage() {
 
                     if (!isMounted.current) return;
 
+                    // ✅ Jangan reconnect jika sudah mismatch
+                    if (!shouldReconnect.current) return;
+
                     setStatus("Disconnected");
                     log("Disconnected from server");
 
-                    // Attempt to reconnect if not closed intentionally and room still exists
                     if (reconnectAttempts < maxReconnectAttempts && event.code !== 1000) {
                         reconnectTimeout = setTimeout(() => {
                             reconnectAttempts++;
                             console.log(`Reconnecting... Attempt ${reconnectAttempts}/${maxReconnectAttempts}`);
                             log(`Reconnecting... (${reconnectAttempts}/${maxReconnectAttempts})`);
                             connectWebSocket();
-                        }, 3000 * reconnectAttempts); // Exponential backoff: 3s, 6s, 9s, etc.
-                    } else if (reconnectAttempts >= maxReconnectAttempts) {
-                        log("Max reconnection attempts reached. Please refresh the page.");
-                        setStatus("Connection Failed");
+                        }, 3000 * reconnectAttempts);
                     }
                 };
 
@@ -795,6 +885,7 @@ export default function RoomPage() {
         // Cleanup function
         return () => {
             isMounted.current = false;
+            shouldReconnect.current = false;
 
             // Clear reconnect timeout
             if (reconnectTimeout) {
